@@ -53,6 +53,24 @@ def test_config_changes_dont_affect_existing_instances(test_rom):
   assert emu.get_audio_buffer_number() > 0
 
 
+def test_construct_on_dirty_heap(test_rom):
+  # melonDS's GPU constructor reads VRAMCaptureBlockFlags before anything initialises it
+  # (upstream bug since ba317e2e). The console object is ~32 MB; once glibc has freed a block that
+  # big, the next one comes from the reused heap. Leave a freed block of 0x80 bytes (which reads as
+  # "unsynced capture") where the emulator will be allocated: without pydsi's zeroed allocation this
+  # crashes on Linux.
+  for _ in range(3):
+    junk = b"\x80" * 33_000_000
+    del junk
+    junk = b"\x80" * 32_900_000
+    del junk
+    for console_type in (0, 1):
+      config.set_console_type(console_type)
+      emu = pydsi.pydsi(test_rom)
+      emu.tick()
+      del emu
+
+
 def test_frame_view_survives_owner(test_rom):
   emu = pydsi.pydsi(test_rom)
   tick_until_running(emu)

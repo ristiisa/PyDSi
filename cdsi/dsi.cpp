@@ -1,6 +1,7 @@
 #include <cstring>
 #include <ctime>
 #include <filesystem>
+#include <new>
 #include <optional>
 #include <stdexcept>
 #include <vector>
@@ -137,6 +138,25 @@ void setupDsiwareBoot(DSi& dsi, const NDSHeader& header) {
   autoLoad.Flags |= (0x03 << 1) | 0x01 | (1 << 4);
   autoLoad.CRC16 = CRC16(autoLoad.PrevTitleID, autoLoad.Length, 0xFFFF);
   std::memcpy(&dsi.MainRAM[0x300], &autoLoad, sizeof(autoLoad));
+}
+
+// Constructs a console on zeroed memory. melonDS's GPU constructor reads members that are only
+// initialised by Reset() (VRAMCaptureBlockFlags, via SetRenderer -> SyncAllVRAMCaptures, since
+// upstream commit ba317e2e); on recycled heap memory that garbage can send it through the
+// still-null renderer and crash. Zeroing first makes construction deterministic.
+// The zeroing goes through a volatile function pointer: NDS's public constructor is inline, and
+// GCC's lifetime dead-store elimination (-flifetime-dse) treats stores made just before an inlined
+// constructor as dead and deletes a plain memset.
+void* (*volatile s_zeroMemory)(void*, int, size_t) = std::memset;
+
+template<typename T, typename A>
+std::unique_ptr<NDS> makeConsole(A&& args, void* userdata) {
+  static_assert(alignof(T) <= __STDCPP_DEFAULT_NEW_ALIGNMENT__, "over-aligned console type needs aligned new/delete");
+  void* mem = ::operator new(sizeof(T));
+  s_zeroMemory(mem, 0, sizeof(T));
+  // Constructors are noexcept. unique_ptr<NDS> deletes through the virtual destructor, which
+  // frees with the matching (sized) global operator delete.
+  return std::unique_ptr<NDS>(new (mem) T(std::move(args), userdata));
 }
 
 std::filesystem::path pathFromUtf8(const std::string& s) {
@@ -302,9 +322,9 @@ Dsi::Dsi(std::string romPath, std::string savePath, bool isGba) {
       std::move(sdcard),
       (bool)m_cfg.dsiDspHle,
     };
-    m_nds = std::make_unique<DSi>(std::move(dsiArgs), m_ctx.get());
+    m_nds = makeConsole<DSi>(std::move(dsiArgs), m_ctx.get());
   } else {
-    m_nds = std::make_unique<NDS>(std::move(ndsArgs), m_ctx.get());
+    m_nds = makeConsole<NDS>(std::move(ndsArgs), m_ctx.get());
   }
 
   // Boot, in the same order as melonDS's EmuInstance::updateConsole + loadROM

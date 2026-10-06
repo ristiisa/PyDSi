@@ -248,6 +248,19 @@ These were found by building `core` with `cl.exe` 19.31 (VS 2022 17.1), interpre
 - That is why pydsi uses clang on Windows. llvm-mingw UCRT is the default and clang-cl the alternative: both understand melonDS's GCC-isms, honour `-fwrapv`, and use CPython's C runtime.
 - These counts are only the first errors per file; a full MSVC port may surface more once these are fixed.
 
+## Upstream melonDS bugs found (worked around in pydsi, worth reporting)
+
+1. **Uninitialised read in the `GPU` constructor, causing an intermittent segfault.**
+   - `GPU::GPU` calls `SetRenderer()`, which first calls `SyncAllVRAMCaptures()` (GPU.cpp:320). That reads `u16 VRAMCaptureBlockFlags[16]` (GPU.h:809), which has no initialiser and is only zeroed in `Reset()`.
+   - If garbage in it has bit 15 set and bit 13 clear, melonDS calls `Rend->SyncVRAMCapture(...)` while `Rend` is still null.
+   - It was introduced by `ba317e2e` (OpenGL 2D renderer, 2026-01-31), so the 1.1 tag doesn't have it.
+   - **Why only Linux.** The console object is about 32.5 MB, just under glibc's 32 MB mmap-threshold ceiling. After one such block has been freed, the next comes from recycled heap memory, so a second emulator in one process can start on the previous one's leftovers. Windows serves allocations that size from fresh zeroed pages and never crashed.
+   - **Workaround.** pydsi constructs `NDS`/`DSi` on zeroed memory (`makeConsole` in `cdsi/dsi.cpp`).
+     - The zeroing goes through a volatile function pointer. `NDS`'s public constructor is inline, and GCC's lifetime dead-store elimination deleted a plain `memset` placed before it.
+     - `tests/test_instances.py::test_construct_on_dirty_heap` reproduces the crash deterministically on Linux. It leaves a freed 33 MB block of `0x80` bytes behind, and crashed 3/3 before the fix.
+   - **Upstream fix:** `u16 VRAMCaptureBlockFlags[16] {};`
+2. **Missing `#include <algorithm>` in FreeBIOS.cpp.** It uses `std::copy`, which fails to compile with libc++. See item 14 above.
+
 ## Decisions made by the maintainer (2026-10-06)
 
 1. **Frames: RGBA**, converted from melonDS's BGRA. A raw mode is only to be added if profiling ever shows the conversion matters.
@@ -327,7 +340,9 @@ Construct, destroy, construct; two live instances of different console types; an
 - **MinGW-w64 gcc 13.2 UCRT:** 53/53 tests pass. The `.pyd` imports only `python310`, `KERNEL32` and the UCRT.
 **Linux: Pop!_OS 24.04 x86_64, gcc 13.3, CMake 3.28, Python 3.12, on a LAN box.**
 - A plain `pip install .[test]` in a fresh venv, with build isolation (nanobind and scikit-build-core from PyPI), builds cleanly.
-- 49 tests pass and 4 skip; no system files are on that box.
+- With the machine's own dumps copied over, the full suite (56 tests) passed 40 runs in a row, after the GPU fix above.
+  - Before the fix, about 1 run in 10 segfaulted in `test_dsi_mode_real_files`.
+  - That was found with AddressSanitizer (clean) and a preloaded crash handler plus `addr2line`.
 - The `.so` links only `libstdc++`, `libm`, `libgcc_s` and `libc`.
 - A `PYDSI_ENABLE_JIT=ON` build also works, and `test_jit_flag` passes. On the test ROM, 600 frames take 0.75 s with the JIT and 1.40 s with the interpreter, and both runs are frame-exact (599 VBlanks).
 - macOS has not been built.
@@ -346,6 +361,5 @@ Construct, destroy, construct; two live instances of different console types; an
 - Whether the TLNC auto-load still works when Unlaunch is installed.
 - macOS builds.
 - manylinux/musllinux wheels and the aarch64 build (only a native x86_64 Linux build was tested).
-- The real-dump tests on Linux.
 - The CI workflow itself, which has never run.
 - Firmware write-back, which needs the emulated system to write its firmware.

@@ -9,6 +9,8 @@ wheelhouse/
 .venv/
 venv/
 .ccache/
+# Console BIOS/firmware/NAND dumps: never commit
+dumps/
 .pytest_cache/
 compile_commands.json
 .vscode/
