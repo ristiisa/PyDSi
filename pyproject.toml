@@ -1,0 +1,59 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "pydsi"
+version = "0.0.1"
+description = "Python interface for the melonDS Nintendo DS/DSi emulator core"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {file = "LICENSE"}
+classifiers = [
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+]
+dependencies = ["numpy"]
+
+[project.optional-dependencies]
+window = ["pygame"]
+audio = ["sounddevice"]
+test = ["pytest"]
+
+[project.urls]
+Homepage = "https://github.com/melonDS-emu/melonDS"
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+cmake.version = ">=3.18"
+build-dir = "build/{wheel_tag}"
+wheel.packages = ["pydsi"]
+sdist.include = ["externals/melonDS"]
+sdist.exclude = [".venv", "build", "externals/melonDS/.git", "externals/melonDS/res", "externals/melonDS/tools"]
+
+[tool.scikit-build.cmake.define]
+PYDSI_ENABLE_JIT = {env = "PYDSI_ENABLE_JIT", default = "OFF"}
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.cibuildwheel]
+build = "cp39-* cp310-* cp311-* cp312-* cp313-*"
+skip = "*-win32 *-manylinux_i686 *-musllinux_i686"
+test-extras = ["test"]
+test-command = "pytest {project}/tests -v"
+
+[tool.cibuildwheel.macos]
+environment = {MACOSX_DEPLOYMENT_TARGET = "11.0"}
+
+[tool.cibuildwheel.windows]
+# melonDS can't be compiled by cl.exe (see NOTES.md). Build with llvm-mingw's UCRT clang (on PATH):
+# same C runtime as CPython, C++ runtime linked statically, so the wheel needs no extra DLLs.
+environment = {CC = "clang", CXX = "clang++", CMAKE_GENERATOR = "Ninja"}

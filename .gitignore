@@ -1,0 +1,14 @@
+**/__pycache__
+*.pyc
+*.so
+*.pyd
+build/
+dist/
+wheelhouse/
+*.egg-info
+.venv/
+venv/
+.ccache/
+.pytest_cache/
+compile_commands.json
+.vscode/
